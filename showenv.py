@@ -2,4 +2,4 @@ source_directory = "/mnt/e/Projects/Jonadex/Veep Raw"  # Replace with the path t
 destination_directory = "/mnt/e/Projects/Jonadex/Veep"
 subtitles_directory = "/mnt/e/Projects/Jonadex/Veep Subtitles"
 show_name = "Veep"
-framerate = 23.976216
+frame_rate = 23.976216
