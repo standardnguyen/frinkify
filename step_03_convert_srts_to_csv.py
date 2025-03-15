@@ -1,53 +1,81 @@
 import os
 import re
-import csv
+import pandas as pd
 from showenv import destination_directory
 
 def parse_srt(srt_file):
     """
-    Parse an SRT file and return a list of subtitle entries.
+    Parse an SRT file and return a pandas DataFrame of subtitle entries.
 
-    Each entry is a dictionary with:
-    - number: the subtitle block number
-    - timestamp: the formatted timestamp range
-    - content: the subtitle text with line breaks removed
+    Handles malformed SRT files where the subtitle number might appear at the
+    end of the previous subtitle's content.
 
     Parameters:
     srt_file (str): Path to the SRT file.
 
     Returns:
-    list: List of dictionaries containing subtitle information.
+    pandas.DataFrame: DataFrame containing subtitle information.
     """
     with open(srt_file, 'r', encoding='utf-8', errors='replace') as f:
         content = f.read()
 
-    # Pattern to match subtitle blocks
-    # Group 1: subtitle number
-    # Group 2: timestamp
-    # Group 3: subtitle text
-    pattern = r'(\d+)\s*\n(\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3})\s*\n((?:.+\n?)+?)(?:\n\n|\Z)'
+    # First, let's identify all timestamps
+    timestamp_pattern = r'(\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3})'
 
-    entries = []
-    for match in re.finditer(pattern, content, re.DOTALL):
-        number = match.group(1)
-        timestamp = match.group(2)
+    # Split the content by timestamps
+    parts = re.split(timestamp_pattern, content)
 
-        # Get subtitle text and clean it
-        text = match.group(3)
-        # Remove any extra whitespace and join lines
-        text = ' '.join(line.strip() for line in text.splitlines())
+    # Initialize lists to store our data
+    numbers = []
+    timestamps = []
+    contents = []
 
-        entries.append({
-            'number': number,
-            'timestamp': timestamp,
-            'content': text
-        })
+    # Process parts in groups of 3: before timestamp, timestamp, after timestamp
+    for i in range(1, len(parts), 2):
+        if i + 1 < len(parts):
+            # The timestamp itself
+            timestamp = parts[i]
 
-    return entries
+            # The content before the timestamp (should contain the subtitle number)
+            before = parts[i-1].strip()
+
+            # The content after the timestamp
+            after = parts[i+1].strip()
+
+            # Extract subtitle number from the content before timestamp
+            number_match = re.search(r'(\d+)\s*$', before)
+            if number_match:
+                subtitle_number = number_match.group(1)
+            else:
+                # If we can't find a number, use a placeholder
+                subtitle_number = f"Unknown-{i//2}"
+
+            # Clean and extract the content
+            # Check if the content contains the next subtitle number
+            next_number_match = re.search(r'\s(\d+)\s*$', after)
+            if next_number_match:
+                # Remove the next subtitle number from the content
+                content_text = after[:next_number_match.start()]
+            else:
+                content_text = after
+
+            # Clean up the content text (join lines with spaces)
+            content_text = ' '.join(line.strip() for line in content_text.splitlines())
+
+            numbers.append(subtitle_number)
+            timestamps.append(timestamp)
+            contents.append(content_text)
+
+    # Create a DataFrame
+    return pd.DataFrame({
+        'Number': numbers,
+        'Timestamp': timestamps,
+        'Content': contents
+    })
 
 def convert_srt_to_csv(srt_file, csv_file):
     """
-    Convert an SRT file to a CSV file.
+    Convert an SRT file to a CSV file using pandas.
 
     Parameters:
     srt_file (str): Path to the SRT file.
@@ -57,26 +85,15 @@ def convert_srt_to_csv(srt_file, csv_file):
     bool: True if successful, False otherwise.
     """
     try:
-        # Parse the SRT file
-        entries = parse_srt(srt_file)
+        # Parse the SRT file into a DataFrame
+        df = parse_srt(srt_file)
 
-        if not entries:
+        if df.empty:
             print(f"Warning: No subtitles found in {srt_file}")
             return False
 
-        # Write to CSV
-        with open(csv_file, 'w', encoding='utf-8', newline='') as f:
-            writer = csv.writer(f)
-            # Write header
-            writer.writerow(['Number', 'Timestamp', 'Content'])
-
-            # Write data
-            for entry in entries:
-                writer.writerow([
-                    entry['number'],
-                    entry['timestamp'],
-                    entry['content']
-                ])
+        # Write DataFrame to CSV
+        df.to_csv(csv_file, index=False, encoding='utf-8')
 
         print(f"Converted {srt_file} to {csv_file}")
         return True
@@ -93,7 +110,7 @@ def process_all_srt_files(destination_dir):
     destination_dir (str): The root directory containing the organized subtitle files.
 
     Returns:
-    int: Number of files successfully converted.
+    tuple: Number of files successfully converted and total number of SRT files.
     """
     success_count = 0
     total_count = 0
